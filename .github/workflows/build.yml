@@ -1,0 +1,38 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  mdarcy-9-2-4:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build NDK r29 image
+        run: docker build -t ghostlock-android:ndk-r29 -f build/Containerfile .
+
+      - name: Build payload
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src/exploit \
+            ghostlock-android:ndk-r29 make -B
+
+      - name: Verify release hash
+        run: |
+          echo "a3a1e75b627d8dd419e9bafd2a73082a8647510bf6ce4f975e52baf5aa1d0761  exploit/build/preload-mdarcy-9.2.4.so" \
+            | sha256sum -c -
+
+      - name: Check watchdog
+        run: python3 -m py_compile watchdog/ghostlock_watchdog.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preload-mdarcy-9.2.4
+          path: exploit/build/preload-mdarcy-9.2.4.so
+          if-no-files-found: error

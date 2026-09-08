@@ -29,3 +29,5 @@ analysis/cve_functions_dump.txt
 # OS junk
 Thumbs.db
 .DS_Store
+__pycache__/
+*.pyc

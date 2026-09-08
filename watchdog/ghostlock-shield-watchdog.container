@@ -1,0 +1,20 @@
+[Unit]
+Description=GhostLock NVIDIA Shield adbd root watchdog
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=localhost/ghostlock-shield-watchdog:9.2.4
+ContainerName=ghostlock-shield-watchdog
+Network=host
+EnvironmentFile=%h/.config/ghostlock-shield/watchdog.env
+Volume=%h/.android:/root/.android:rw,Z
+Volume=%h/.local/share/ghostlock-shield/payload:/payload:ro,Z
+Volume=%h/.local/share/ghostlock-shield/state:/state:rw,Z
+
+[Service]
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

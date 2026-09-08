@@ -1,0 +1,15 @@
+FROM docker.io/library/debian:bookworm-slim
+
+ARG NDK_URL=https://dl.google.com/android/repository/android-ndk-r29-linux.zip
+ARG NDK_SHA1=87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates make unzip wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && wget -q "$NDK_URL" -O /tmp/android-ndk.zip \
+    && echo "$NDK_SHA1  /tmp/android-ndk.zip" | sha1sum -c - \
+    && unzip -q /tmp/android-ndk.zip -d /opt \
+    && rm /tmp/android-ndk.zip
+
+WORKDIR /src/exploit
+CMD ["make"]
