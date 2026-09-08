@@ -11,7 +11,7 @@ jobs:
   mdarcy-9-2-4:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build NDK r29 image
         run: docker build -t ghostlock-android:ndk-r29 -f build/Containerfile .
@@ -31,7 +31,7 @@ jobs:
       - name: Check watchdog
         run: python3 -m py_compile watchdog/ghostlock_watchdog.py
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: preload-mdarcy-9.2.4
           path: exploit/build/preload-mdarcy-9.2.4.so
