@@ -2,13 +2,12 @@
 
 The exploit changes the credentials of the live `adbd` task. That survives
 client disconnects, but Android recreates stock `adbd` credentials after an
-`adbd` restart or device reboot. On this release, locked Verified Boot and
-enforcing dm-verity prevent a safe no-wipe on-device boot-script installation.
+`adbd` restart or device reboot.
 
-This watchdog provides practical persistence without altering verified
-partitions. A rootless Podman service on an always-on Linux host waits for the
-exact supported Shield fingerprint and kernel, checks whether a fresh ADB shell
-is UID 0, and reapplies the hash-pinned payload only when needed.
+This watchdog is the external-host fallback to the on-device mechanism in
+`persistence/`. A rootless Podman service on an always-on Linux host waits for
+the exact supported Shield fingerprint and kernel, checks whether a fresh ADB
+shell is UID 0, and reapplies the hash-pinned payload only when needed.
 
 Safety controls:
 
@@ -35,6 +34,22 @@ The systemd user manager must start at boot. Most always-on hosts can enable
 that once with `loginctl enable-linger "$USER"` from an administrator account.
 
 ## Stop or remove
+
+To retain the host fallback but prevent it from starting, mask the generated
+unit:
+
+```sh
+systemctl --user mask --now ghostlock-shield-watchdog.service
+```
+
+Restore it later with:
+
+```sh
+systemctl --user unmask ghostlock-shield-watchdog.service
+systemctl --user start ghostlock-shield-watchdog.service
+```
+
+To remove the Quadlet instead:
 
 ```sh
 systemctl --user stop ghostlock-shield-watchdog.service

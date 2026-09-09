@@ -23,16 +23,84 @@ jobs:
             -w /src/exploit \
             ghostlock-android:ndk-r29 make -B
 
-      - name: Verify release hash
+      - name: Build on-device boot runner
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src/persistence/app \
+            ghostlock-android:ndk-r29 make -B
+
+      - name: Verify deterministic native hashes
         run: |
           echo "a3a1e75b627d8dd419e9bafd2a73082a8647510bf6ce4f975e52baf5aa1d0761  exploit/build/preload-mdarcy-9.2.4.so" \
             | sha256sum -c -
+          echo "56fb508527ffe7da5ab79f857c9d51edbb19b940dcfc88753146927e848a2cf6  persistence/app/build/libghostlock_runner.so" \
+            | sha256sum -c -
+
+      - name: Build APK tools image
+        run: docker build -t ghostlock-apk-tools:bookworm -f persistence/app/Containerfile.tools .
+
+      - name: Create ephemeral CI signing key
+        run: |
+          mkdir -p "$RUNNER_TEMP/ghostlock-signing"
+          printf '%s\n%s\n' ghostlock-ci-password ghostlock-ci-password \
+            > "$RUNNER_TEMP/ghostlock-signing/apksigner-passwords"
+          docker run --rm \
+            -v "$RUNNER_TEMP/ghostlock-signing:/sign" \
+            ghostlock-apk-tools:bookworm \
+            keytool -genkeypair -noprompt \
+              -keystore /sign/ghostlock-ci.p12 \
+              -storetype PKCS12 \
+              -storepass ghostlock-ci-password \
+              -keypass ghostlock-ci-password \
+              -alias ghostlock-boot \
+              -keyalg RSA -keysize 3072 -validity 1 \
+              -dname "CN=GhostLock CI"
+
+      - name: Assemble and verify APK
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -v "$RUNNER_TEMP/ghostlock-signing:/sign" \
+            -e GHOSTLOCK_KEYSTORE=/sign/ghostlock-ci.p12 \
+            -e GHOSTLOCK_KEY_PASSWORD_FILE=/sign/apksigner-passwords \
+            -w /src/persistence/app \
+            ghostlock-apk-tools:bookworm sh build-apk.sh
+          docker run --rm \
+            -v "$PWD:/src" \
+            ghostlock-apk-tools:bookworm \
+            sh -c 'aapt list /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk | grep -Fx classes.dex && aapt list /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk | grep -Fx lib/arm64-v8a/libghostlock_runner.so && aapt list /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk | grep -Fx lib/arm64-v8a/libghostlock.so'
+          mv persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk \
+            persistence/app/build/ghostlock-boot-mdarcy-9.2.4-ci.apk
 
       - name: Check watchdog
         run: python3 -m py_compile watchdog/ghostlock_watchdog.py
 
+      - name: Check scripts
+        shell: pwsh
+        run: |
+          [void][scriptblock]::Create((Get-Content persistence/install.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content persistence/uninstall.ps1 -Raw))
+
       - uses: actions/upload-artifact@v7
         with:
-          name: preload-mdarcy-9.2.4
-          path: exploit/build/preload-mdarcy-9.2.4.so
+          name: ghostlock-mdarcy-9.2.4-ci
+          path: |
+            exploit/build/preload-mdarcy-9.2.4.so
+            persistence/app/build/libghostlock_runner.so
+            persistence/app/build/ghostlock-boot-mdarcy-9.2.4-ci.apk
+            persistence/app/AndroidManifest.xml
+            persistence/app/runner.c
+            persistence/app/smali/
+            persistence/app/Makefile
+            persistence/app/build-apk.sh
+            persistence/app/Containerfile.tools
+            persistence/install.ps1
+            persistence/uninstall.ps1
+            persistence/README.md
+            README.md
+            PORT_STATUS.md
+            LICENSE
+            SHA256SUMS
           if-no-files-found: error
+          retention-days: 7

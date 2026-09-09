@@ -1,0 +1,14 @@
+FROM docker.io/library/debian:bookworm-slim
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        aapt \
+        android-framework-res \
+        apksigner \
+        ca-certificates \
+        default-jre-headless \
+        smali \
+        zipalign \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src/persistence/app

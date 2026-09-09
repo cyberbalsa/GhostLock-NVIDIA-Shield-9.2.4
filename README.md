@@ -29,13 +29,21 @@ changes only live kernel state.
 After a successful run, a fresh connection reports UID/GID 0 for both `adbd`
 and its child shell, full capabilities through capability 37, seccomp disabled,
 and SELinux permissive. Root survives ADB client disconnects. It does not
-survive an `adbd` restart or device reboot.
+survive an `adbd` restart or device reboot by itself.
 
 For practical reboot persistence without modifying verified partitions, the
-repository includes an optional, rootless Podman watchdog for an always-on
-Linux host. It is locked to the exact fingerprint, kernel, and payload hash and
-reapplies the exploit only when a fresh ADB shell is not root. See
+repository includes a userdata APK. Its non-exported `BOOT_COMPLETED` receiver
+starts a short-lived foreground service, which runs the hash-pinned exploit
+once per boot from an unprivileged app UID and stops when the runner exits. No
+external host is needed after installation. An external Podman watchdog remains
+available as a recovery fallback. See
+[`persistence/README.md`](persistence/README.md) and
 [`watchdog/README.md`](watchdog/README.md).
+
+This is autonomous re-exploitation, not a static firmware patch: every boot has
+a short interval in which `adbd` still has its stock credentials. Making
+`adbd` start as root before Android initializes it would require changing the
+verified boot chain, which is outside this locked, no-wipe design.
 
 ## Exploit chain
 
@@ -132,13 +140,41 @@ The payload refuses to retrigger from an already-UID-0 ADB shell unless
 `GHOSTLOCK_FORCE_ROOT_TRIGGER=1` is deliberately supplied. Do not force it;
 the privileged scheduling path has different PI behavior and can panic.
 
+## On-device persistence
+
+Download the signed release APK to
+`persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk`, then install and arm it
+from an authorized PowerShell ADB host:
+
+```powershell
+./persistence/install.ps1 `
+  -Target SHIELD_ADDRESS:5555 `
+  -AdbPath C:/path/to/platform-tools/adb.exe
+```
+
+The installer changes only userdata and does not reboot. At the next
+`BOOT_COMPLETED`, the app validates the exact fingerprint, kernel, and embedded
+payload hash, records its attempt, and invokes GhostLock from its normal app
+UID. A file lock, one-attempt-per-boot state, and a 15-minute cross-boot
+cooldown prevent duplicate or reboot-loop attempts. It installs no `su` binary.
+Android shows a low-priority `Restoring ADB root` notification only while the
+native runner is active; the waiter removes it when the process exits.
+See [`persistence/README.md`](persistence/README.md) for build, signing, log,
+verification, recovery, and uninstall details.
+
+The final APK was validated with the external watchdog stopped: boot count 134
+first exposed stock UID-2000/enforcing `adbd`, and the next fresh transport was
+UID/GID 0 with the full `0x3fffffffff` capability mask, seccomp disabled, and
+SELinux permissive. The service and notification had cleaned themselves up.
+
 ## Logs and recovery
 
-Diagnostics are synchronously written to
+Manual-run diagnostics are synchronously written to
 `/sdcard/Download/log_<timestamp>.txt`, falling back to `/data/local/tmp`.
-If the race panics the kernel, wait for the normal reboot and pull the latest
-log before retrying. The watchdog defaults to a 15-minute global cooldown and
-two attempts per boot to avoid a reboot loop.
+The boot app redirects runner and payload output to its private
+`files/boot.log`, readable with `run-as com.cyberbalsa.ghostlockboot`. If the
+race panics the kernel, the pre-trigger state prevents another attempt in that
+boot count and the 15-minute cooldown carries across the reboot.
 
 ## Repository map
 
@@ -146,7 +182,8 @@ two attempts per boot to avoid a reboot loop.
   credential patch.
 - `exploit/targets/shield-mdarcy-9.2.4/`: exact build-specific target layout.
 - `analysis/`: kernel symbol and layout extraction helpers.
-- `watchdog/`: hash-pinned host-side re-root service.
+- `persistence/`: on-device boot APK, native runner, and installer.
+- `watchdog/`: hash-pinned host-side recovery fallback.
 - `report.md`: original OPPO reference-port analysis retained for provenance.
 
 ## Credits and license

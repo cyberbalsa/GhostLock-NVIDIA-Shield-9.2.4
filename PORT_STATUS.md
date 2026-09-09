@@ -14,10 +14,11 @@ Seccomp: 0
 SELinux: permissive
 ```
 
-This is a live, volatile root. Rebooting recreates `adbd` with its stock
-credentials and restores the SELinux globals, so rerun the exploit after a
-reboot if root is needed again. The payload refuses to re-enter GhostLock when
-the calling ADB shell is already UID 0 unless
+The credential change itself is live and volatile: rebooting recreates `adbd`
+with stock credentials and restores the SELinux globals. The bundled userdata
+APK now performs that re-exploitation autonomously after `BOOT_COMPLETED`, so
+no external host is required after installation. The payload refuses to
+re-enter GhostLock when the calling ADB shell is already UID 0 unless
 `GHOSTLOCK_FORCE_ROOT_TRIGGER=1` is explicitly supplied.
 
 ## Device and OTA
@@ -80,6 +81,15 @@ mask `0x3fffffffff`.
 The binary was built with Android NDK r29 in Podman. The release payload does
 not embed or install `su`, a daemon, or a wallpaper artifact.
 
+Autonomous boot artifacts:
+
+- Native runner: `libghostlock_runner.so`, 19896 bytes,
+  SHA-256 `56fb508527ffe7da5ab79f857c9d51edbb19b940dcfc88753146927e848a2cf6`.
+- Signed APK: `ghostlock-boot-mdarcy-9.2.4.apk`, 78324 bytes,
+  SHA-256 `5ced50985a40063f8d3a0d9497b5b850b7e085fac2c35b028956dcfaf99e9495`.
+- APK package/version: `com.cyberbalsa.ghostlockboot`, version code 2,
+  version name 1.1.0; verified with APK signature schemes v2 and v3.
+
 ## Fresh-boot invocation
 
 Set `GHOSTLOCK_ADBD_PID` to the current result of `pidof adbd`:
@@ -103,29 +113,54 @@ LD_PRELOAD=/data/local/tmp/preload-mdarcy-9.2.4.so \
 Verify from a new connection with `adb shell id` and by inspecting
 `/proc/$(pidof adbd)/status`.
 
-## Long-term ADB root
+## Autonomous on-device ADB root
 
-The live credential patch survives client disconnects but not an `adbd`
-restart or reboot. The target reports locked, green Verified Boot and enforcing
-dm-verity, so installing an on-device boot hook without an independently
-validated boot-chain bypass would make the device fail verification.
+`persistence/` contains a release-signed userdata APK. Its non-exported boot
+receiver starts a temporary foreground service, which retains an unprivileged
+native runner for the duration of the race. The runner validates the exact
+fingerprint, kernel release, and embedded payload hash; holds a nonblocking
+lock; records no more than one attempt for each Android boot count; and applies
+a 15-minute cooldown across boots. State is written before the vulnerable
+operation so a panic cannot form a reboot loop.
 
-`watchdog/` instead supplies a rootless Podman/systemd user service for an
-always-on authorized ADB host. It checks the exact fingerprint, kernel release,
-payload hash, current boot ID, and fresh-shell UID before acting. Persistent
-state enforces a 15-minute retry cooldown and a two-attempt-per-boot ceiling.
-This provides automatic re-root after a normal reboot without modifying boot,
-system, vendor, userdata contents other than the staged payload, or the
-bootloader state.
+An Android app inherits ART's blocked-signal mask. During validation,
+SIGUSR1 was observed both pending on the GhostLock waiter (`SigPnd=0x200`) and
+blocked (`SigBlk` contained `0x200`). The final runner clears that mask before
+`exec`, allowing the exploit's targeted futex-wait release to behave exactly as
+it does from an ADB shell. A waiter thread keeps the foreground service alive
+until the native process exits, then removes the notification and stops the
+service.
 
-The deployed service was verified end to end: after a normal reboot it saw a
-fresh UID 2000 `adbd`, made one attempt, and a new ADB transport reported UID 0
-with the expected capability mask and seccomp state.
+The final build was verified end to end on 2026-09-08 with the external host
+watchdog stopped:
+
+- Before reboot: boot count 133, UID 2000, SELinux enforcing.
+- After reboot: boot count 134, boot ID
+  `1f2f114b-69c8-4d49-a3ab-dd697270708e`; the first fresh transport was still
+  UID 2000 and enforcing.
+- At epoch `1788915831`, the app ran as UID/GID 10069, seccomp mode 2, and
+  `u:r:untrusted_app_27:s0:c69,c256,c512,c768`.
+- At 21:03:58 EDT, the kernel task walk found PID 3532 with `comm=adbd` and
+  installed UID/GID 0 plus capability mask `0x3fffffffff`; SELinux changed
+  from enforcing to permissive.
+- A new ADB transport reported UID/GID 0, all five capability sets equal to
+  `0000003fffffffff`, and seccomp mode 0. The app service and active
+  notification were gone.
+- The Linux fallback unit remained inactive throughout and was subsequently
+  masked.
+
+This is autonomous per-boot re-exploitation, not a verified-firmware change.
+There is a short stock-`adbd` window on every boot, and an unusual later
+`adbd` restart loses root until the next reboot. Making `adbd` start statically
+as root would require a modified boot image or another verified-boot bypass,
+which is outside the locked, no-wipe design. `watchdog/` remains available as a
+deliberately disabled recovery fallback.
 
 ## Runtime caveats
 
 - The race can panic the kernel. The Shield reboots normally and userdata has
-  remained intact, but this is not a persistence mechanism.
+  remained intact; the boot app's pre-trigger state and cooldown reduce the
+  risk of a repeated crash loop.
 - The intentional short `copy_from_user` fault clears `selinux_enforcing` and
   its adjacent `default_noexec` integer. Both return to stock values on reboot;
   `default_noexec` has no effect while SELinux is permissive.

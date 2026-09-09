@@ -6,6 +6,8 @@ analysis/*.tar
 
 # Build artifacts
 exploit/build/
+persistence/build/
+persistence/app/build/
 *.o
 *.so.tmp
 exploit/build_embed.sh
