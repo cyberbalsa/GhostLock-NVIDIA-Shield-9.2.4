@@ -69,9 +69,7 @@ jobs:
           docker run --rm \
             -v "$PWD:/src" \
             ghostlock-apk-tools:bookworm \
-            sh -c 'aapt list /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk | grep -Fx classes.dex && aapt list /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk | grep -Fx lib/arm64-v8a/libghostlock_runner.so && aapt list /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk | grep -Fx lib/arm64-v8a/libghostlock.so'
-          mv persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk \
-            persistence/app/build/ghostlock-boot-mdarcy-9.2.4-ci.apk
+            sh -c 'aapt list /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk | grep -Fx classes.dex && aapt list /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk | grep -Fx lib/arm64-v8a/libghostlock_runner.so && aapt list /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk | grep -Fx lib/arm64-v8a/libghostlock.so && mv /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4.apk /src/persistence/app/build/ghostlock-boot-mdarcy-9.2.4-ci.apk'
 
       - name: Check watchdog
         run: python3 -m py_compile watchdog/ghostlock_watchdog.py
