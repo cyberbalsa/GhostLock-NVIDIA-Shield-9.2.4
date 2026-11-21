@@ -21,6 +21,7 @@ import time
 from datetime import datetime, timezone
 
 
+DEFAULT_DEVICE = "mdarcy"
 DEFAULT_FINGERPRINT = (
     "NVIDIA/mdarcy/mdarcy:11/RQ1A.210105.003/"
     "7825230_4387.0822:user/release-keys"
@@ -161,11 +162,12 @@ def verify_target(shield: Shield) -> tuple[bool, str]:
         "SHIELD_EXPECTED_FINGERPRINT", DEFAULT_FINGERPRINT
     )
     expected_kernel = os.environ.get("SHIELD_EXPECTED_KERNEL", DEFAULT_KERNEL)
+    expected_device = os.environ.get("SHIELD_EXPECTED_DEVICE", DEFAULT_DEVICE)
     device = shield.property("ro.product.device")
     fingerprint = shield.property("ro.build.fingerprint")
     kernel = shield.shell("uname -r")
-    if device != "mdarcy":
-        return False, f"device mismatch: expected mdarcy, got {device!r}"
+    if device != expected_device:
+        return False, f"device mismatch: expected {expected_device}, got {device!r}"
     if fingerprint != expected_fingerprint:
         return False, f"fingerprint mismatch: {fingerprint!r}"
     if kernel != expected_kernel:

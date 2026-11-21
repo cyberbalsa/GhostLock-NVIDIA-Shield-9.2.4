@@ -11,7 +11,7 @@ shell is UID 0, and reapplies the hash-pinned payload only when needed.
 
 Safety controls:
 
-- exact `mdarcy` fingerprint and kernel allowlist;
+- exact device, fingerprint and kernel allowlist for the chosen build;
 - exact payload SHA-256 check before startup;
 - no exploit run while `adbd` is already root;
 - 15-minute retry cooldown and two attempts per boot by default;
@@ -25,7 +25,7 @@ Authorize the Linux host for network ADB first and make sure its
 README, then run:
 
 ```sh
-./watchdog/install.sh SHIELD_ADDRESS:5555
+./watchdog/install.sh SHIELD_ADDRESS:5555 [mdarcy|darcy]   # default mdarcy
 systemctl --user status ghostlock-shield-watchdog.service
 journalctl --user -u ghostlock-shield-watchdog.service -f
 ```
