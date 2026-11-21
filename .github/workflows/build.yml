@@ -16,12 +16,14 @@ jobs:
       - name: Build NDK r29 image
         run: docker build -t ghostlock-android:ndk-r29 -f build/Containerfile .
 
-      - name: Build payload
+      - name: Build payloads
         run: |
-          docker run --rm \
-            -v "$PWD:/src" \
-            -w /src/exploit \
-            ghostlock-android:ndk-r29 make -B
+          for dev in mdarcy darcy; do
+            docker run --rm \
+              -v "$PWD:/src" \
+              -w /src/exploit \
+              ghostlock-android:ndk-r29 make -B DEVICE=$dev
+          done
 
       - name: Build on-device boot runner
         run: |
@@ -33,6 +35,8 @@ jobs:
       - name: Verify deterministic native hashes
         run: |
           echo "a3a1e75b627d8dd419e9bafd2a73082a8647510bf6ce4f975e52baf5aa1d0761  exploit/build/preload-mdarcy-9.2.4.so" \
+            | sha256sum -c -
+          echo "0beac622d6c92ac2f137aa7a60e4730fd3d3f9bad612d9d5d99b8cf03de5a524  exploit/build/preload-darcy-9.2.4.so" \
             | sha256sum -c -
           echo "56fb508527ffe7da5ab79f857c9d51edbb19b940dcfc88753146927e848a2cf6  persistence/app/build/libghostlock_runner.so" \
             | sha256sum -c -
@@ -85,6 +89,7 @@ jobs:
           name: ghostlock-mdarcy-9.2.4-ci
           path: |
             exploit/build/preload-mdarcy-9.2.4.so
+            exploit/build/preload-darcy-9.2.4.so
             persistence/app/build/libghostlock_runner.so
             persistence/app/build/ghostlock-boot-mdarcy-9.2.4-ci.apk
             persistence/app/AndroidManifest.xml

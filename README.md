@@ -24,6 +24,9 @@ The port was validated on a locked device with green Verified Boot and
 enforcing dm-verity. Those mechanisms remain intact because the exploit
 changes only live kernel state.
 
+The 2017 `darcy` Shield TV is also supported and validated; see
+[`PORT_STATUS.md`](PORT_STATUS.md).
+
 ## Result and lifetime
 
 After a successful run, a fresh connection reports UID/GID 0 for both `adbd`
@@ -69,7 +72,8 @@ directly with an installed Linux NDK:
 
 ```sh
 cd exploit
-make NDK=/opt/android-ndk-r29
+make NDK=/opt/android-ndk-r29              # DEVICE=mdarcy by default
+make NDK=/opt/android-ndk-r29 DEVICE=darcy
 ```
 
 Or build the supplied Podman image, which downloads the official r29 Linux
@@ -94,6 +98,25 @@ The Shield build intentionally excludes the reference project's embedded `su`
 daemon and wallpaper payload.
 
 ## Run
+
+`exploit/run.sh` is the supported path. It reads the build fingerprint out of
+the payload itself, compares it against the device, and refuses before pushing
+anything if they differ. Each payload only matches one build, so running one
+elsewhere drives the race with foreign addresses.
+
+```sh
+./exploit/run.sh SHIELD_ADDRESS:5555 darcy --preflight    # constants only, no kernel
+./exploit/run.sh SHIELD_ADDRESS:5555 darcy --check        # arbitrary read, no mutation
+./exploit/run.sh SHIELD_ADDRESS:5555 darcy --write-test   # write primitive, own scratch
+./exploit/run.sh SHIELD_ADDRESS:5555 darcy --root         # the credential write
+```
+
+The stages rise in effect. `--preflight` cannot touch the kernel; everything
+from `--check` onward runs the race and can panic. `--root` reopens the
+transport afterwards and reports the result. Add `--dry-run` to print what
+would run without pushing.
+
+The manual sequence it performs is below, for when you want to deviate from it.
 
 Connect over authorized network ADB, push the release asset or local build,
 then enter an ADB shell:
@@ -178,9 +201,10 @@ boot count and the 15-minute cooldown carries across the reboot.
 
 ## Repository map
 
+- `exploit/run.sh`: build-checked push and run, with staged modes.
 - `exploit/src/`: trigger, reclaim, arbitrary read/write, and bounded adbd
   credential patch.
-- `exploit/targets/shield-mdarcy-9.2.4/`: exact build-specific target layout.
+- `exploit/targets/shield-<device>-9.2.4/`: exact build-specific target layout.
 - `analysis/`: kernel symbol and layout extraction helpers.
 - `persistence/`: on-device boot APK, native runner, and installer.
 - `watchdog/`: hash-pinned host-side recovery fallback.
