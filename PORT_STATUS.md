@@ -156,6 +156,58 @@ as root would require a modified boot image or another verified-boot bypass,
 which is outside the locked, no-wipe design. `watchdog/` remains available as a
 deliberately disabled recovery fallback.
 
+## darcy (2017 Shield TV) 9.2.4 target
+
+Validated on hardware: the live `adbd` was rooted on the first
+correctly-targeted attempt, with mdarcy's race tunables unchanged and no panic.
+
+| Field | Value |
+| --- | --- |
+| Fingerprint | `NVIDIA/darcy/darcy:11/RQ1A.210105.003/13961458_4387.0822:user/release-keys` |
+| Kernel | `4.9.141-tegra #2 SMP PREEMPT Fri Jan 30 21:51:37 PST 2026 aarch64` |
+| Android patch level | `2026-01-05` |
+| Link-time `_text` | `0xffffff8008080000` |
+| Target header | `exploit/targets/shield-darcy-9.2.4/target.h` |
+| Generator | `analysis/generate_shield_target.py --device darcy` |
+| Output | `exploit/build/preload-darcy-9.2.4.so`, `156912` bytes |
+| SHA-256 | `0beac622d6c92ac2f137aa7a60e4730fd3d3f9bad612d9d5d99b8cf03de5a524` |
+
+```sh
+cd exploit && make DEVICE=darcy
+```
+
+Against mdarcy, every text-segment symbol is at the same offset. Data and bss
+move `+0x10000`, `ashmem_fops` and `anon_pipe_buf_ops` `-0x40`, and
+`memstart_addr` and `module_alloc_base` `+0x2d90`. Struct offsets are identical,
+and the device's `/proc/config.gz` is byte-identical to the IKCONFIG carried in
+its OTA boot image.
+
+Slab geometry from `/sys/kernel/slab`: `cred_jar` 168/192, `mm_struct` 864/896
+at 18 objects per order-2 slab, which agrees with the sizes `cred_init` and
+`proc_caches_init` pass to `kmem_cache_create`.
+
+KASLR is off, so use `GHOSTLOCK_FIXED_BASE=1`. `/proc/device-tree/chosen` has no
+`kaslr-seed`; arm64 zeroes that property in place rather than deleting it, so an
+absent property means the bootloader never supplied one. `/proc/kallsyms` reads
+as zeros even with the full capability set, because `kptr_restrict` is 2.
+
+Staging knobs, in increasing order of effect. The first three stop before
+mutating anything, and `GHOSTLOCK_ADBD_ROOT_CONFIGFS` is tested ahead of the
+others, so omit it when using them:
+
+| Knob | Reaches |
+| --- | --- |
+| `GHOSTLOCK_PREFLIGHT` | logs target constants, no kernel interaction |
+| `GHOSTLOCK_ADBD_CRED_DUMP` | arbitrary read; locates `adbd` and dumps its `cred` |
+| `GHOSTLOCK_BOUNDED_WRITE_TEST` | write primitive, into the sprayed page's own scratch |
+| `GHOSTLOCK_ADBD_ROOT_CONFIGFS` | the credential write and SELinux permissive |
+
+`slide mcast returned ret=-1 errno=99` occurs on successful runs and is not a
+fault: that `setsockopt` is expected to fail once it has stamped the stack.
+
+`persistence/` pins mdarcy's fingerprint and payload hash, so per-boot darcy
+root needs its own build.
+
 ## Runtime caveats
 
 - The race can panic the kernel. The Shield reboots normally and userdata has

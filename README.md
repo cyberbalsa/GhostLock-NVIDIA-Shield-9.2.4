@@ -24,6 +24,9 @@ The port was validated on a locked device with green Verified Boot and
 enforcing dm-verity. Those mechanisms remain intact because the exploit
 changes only live kernel state.
 
+The 2017 `darcy` Shield TV is also supported and validated; see
+[`PORT_STATUS.md`](PORT_STATUS.md).
+
 ## Result and lifetime
 
 After a successful run, a fresh connection reports UID/GID 0 for both `adbd`
@@ -69,7 +72,8 @@ directly with an installed Linux NDK:
 
 ```sh
 cd exploit
-make NDK=/opt/android-ndk-r29
+make NDK=/opt/android-ndk-r29              # DEVICE=mdarcy by default
+make NDK=/opt/android-ndk-r29 DEVICE=darcy
 ```
 
 Or build the supplied Podman image, which downloads the official r29 Linux
@@ -180,7 +184,7 @@ boot count and the 15-minute cooldown carries across the reboot.
 
 - `exploit/src/`: trigger, reclaim, arbitrary read/write, and bounded adbd
   credential patch.
-- `exploit/targets/shield-mdarcy-9.2.4/`: exact build-specific target layout.
+- `exploit/targets/shield-<device>-9.2.4/`: exact build-specific target layout.
 - `analysis/`: kernel symbol and layout extraction helpers.
 - `persistence/`: on-device boot APK, native runner, and installer.
 - `watchdog/`: hash-pinned host-side recovery fallback.
