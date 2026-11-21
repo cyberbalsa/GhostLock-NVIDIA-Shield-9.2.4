@@ -179,7 +179,7 @@ def main() -> None:
         "TASK_STATIC_PRIO_OFF": "116",
         "TASK_NORMAL_PRIO_OFF": "120",
         "TASK_RT_PRIORITY_OFF": "124",
-        "TASK_SIZE": "3528",
+        "TASK_SIZE": "3520",
         "TASK_SECCOMP_OFF": "1992",
         "THREAD_INFO_FLAGS_OFF": "0x00",
         "THREAD_INFO_ADDR_LIMIT_OFF": "0x08",
