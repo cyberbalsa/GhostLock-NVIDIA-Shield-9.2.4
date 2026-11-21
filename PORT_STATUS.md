@@ -72,7 +72,7 @@ mask `0x3fffffffff`.
 ## Build and deployed artifact
 
 - Target header: `exploit/targets/shield-mdarcy-9.2.4/target.h`
-- Generator: `analysis/generate_mdarcy_target.py`
+- Generator: `analysis/generate_shield_target.py --device mdarcy`
 - Output: `exploit/build/preload-mdarcy-9.2.4.so`
 - Size: `156912` bytes
 - SHA-256: `a3a1e75b627d8dd419e9bafd2a73082a8647510bf6ce4f975e52baf5aa1d0761`
